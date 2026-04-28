@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Gestion factures</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-5 font-sans">
+
+    <div class="max-w-5xl mx-auto">
+        <div class="flex justify-between items-center bg-white p-6 rounded-xl shadow-sm mb-6 border-b-2 border-gray-200">
+            <h1 class="text-2xl font-bold text-gray-800 uppercase tracking-tighter">Suivi factures M2I</h1>
+            <div class="flex gap-3">
+                <button onclick="exporterDonnees()" class="bg-black text-white text-xs px-4 py-2 rounded-lg font-bold hover:bg-gray-800 transition">📥 BACKUP</button>
+                <button onclick="document.getElementById('importFile').click()" class="bg-white border text-xs px-4 py-2 rounded-lg font-bold hover:bg-gray-50">📤 RESTAURER</button>
+                <input type="file" id="importFile" class="hidden" onchange="importerDonnees(event)">
+            </div>
+        </div>
+
+        <div id="dashboard" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 text-center"></div>
+
+        <div class="bg-white p-6 rounded-xl shadow-sm mb-8 border-t-4 border-blue-600">
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                <div><label class="text-[10px] font-bold text-gray-400">N° FACTURE</label><input type="text" id="num" class="border p-2 rounded w-full"></div>
+                <div><label class="text-[10px] font-bold text-gray-400">DÉSIGNATION</label><input type="text" id="des" class="border p-2 rounded w-full"></div>
+                <div><label class="text-[10px] font-bold text-gray-400">MONTANT (€)</label><input type="number" id="mon" class="border p-2 rounded w-full font-bold text-blue-600"></div>
+                <div><label class="text-[10px] font-bold text-gray-400">DATE FACTURE</label><input type="date" id="datF" class="border p-1.5 rounded w-full text-xs"></div>
+                <div><label class="text-[10px] font-bold text-gray-400">ÉCHÉANCE</label><input type="date" id="datE" class="border p-1.5 rounded w-full text-xs"></div>
+            </div>
+            <div class="flex gap-4">
+                <div class="flex-1">
+                    <label class="text-[10px] font-bold text-gray-400 uppercase">Chemin local du fichier</label>
+                    <input type="text" id="path" placeholder="C:\Users\Documents\Facture_01.pdf" class="border p-2 rounded w-full text-sm italic bg-gray-50">
+                </div>
+                <button onclick="ajouter()" class="bg-blue-600 text-white px-10 rounded font-bold hover:bg-blue-700 self-end h-[42px] transition">ENREGISTRER</button>
+            </div>
+        </div>
+
+        <h2 class="font-black text-red-600 mb-4 text-sm tracking-widest uppercase">🔴 Factures à régler</h2>
+        <div id="liste" class="space-y-4 mb-10"></div>
+
+        <h2 class="font-black text-emerald-600 mb-4 text-sm tracking-widest uppercase">🟢 Factures terminées</h2>
+        <div id="historique" class="bg-white rounded-xl shadow-sm p-4 space-y-2 mb-10"></div>
+        
+        <h2 class="font-black text-gray-400 mb-4 text-sm tracking-widest uppercase text-xs">📝 Derniers paiements</h2>
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden border">
+            <table class="w-full text-left text-xs">
+                <tbody id="journal"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const STORE_KEY = 'DATABASE_FACTURES_V_FINAL_STABLE';
+        let data = JSON.parse(localStorage.getItem(STORE_KEY)) || { enCours: [], historique: [], journal: [] };
+
+        function save() {
+            localStorage.setItem(STORE_KEY, JSON.stringify(data));
+            render();
+        }
+
+        function copyPath(text) {
+            navigator.clipboard.writeText(text);
+            alert("Chemin copié !");
+        }
+
+        function modifier(id) {
+            const f = data.enCours.find(i => i.id === id);
+            const nouveauNom = prompt("Nouveau libellé :", f.des);
+            const nouveauTotal = prompt("Nouveau Montant Total (€) :", f.total);
+            const nouveauPath = prompt("Nouveau chemin du fichier :", f.path);
+
+            if (nouveauNom !== null) f.des = nouveauNom;
+            if (nouveauTotal !== null) {
+                const diff = parseFloat(nouveauTotal) - f.total;
+                f.total = parseFloat(nouveauTotal);
+                f.restant = Math.round((f.restant + diff) * 100) / 100;
+            }
+            if (nouveauPath !== null) f.path = nouveauPath;
+            save();
+        }
+
+        function render() {
+            const aPayer = data.enCours.reduce((sum, f) => sum + f.restant, 0);
+            const dejaPaye = data.journal.reduce((sum, v) => sum + v.montant, 0);
+            
+            document.getElementById('dashboard').innerHTML = `
+                <div class="bg-red-50 p-4 rounded-xl border border-red-100"><div class="text-[10px] font-bold text-red-400 uppercase">Reste à payer</div><div class="text-3xl font-black">${aPayer.toFixed(2)}€</div></div>
+                <div class="bg-emerald-50 p-4 rounded-xl border border-emerald-100"><div class="text-[10px] font-bold text-emerald-400 uppercase">Total réglé</div><div class="text-3xl font-black">${dejaPaye.toFixed(2)}€</div></div>
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-100"><div class="text-[10px] font-bold text-blue-400 uppercase">Factures actives</div><div class="text-3xl font-black">${data.enCours.length}</div></div>
+            `;
+
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('liste').innerHTML = data.enCours.map(f => `
+                <div class="bg-white p-5 rounded-xl shadow-sm border-l-8 border-red-500 flex flex-col md:flex-row justify-between items-center gap-4 transition hover:shadow-md">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-[10px] text-blue-500 font-mono italic truncate max-w-xs">${f.path || 'Aucun lien'}</span>
+                            ${f.path ? `<button onclick="copyPath('${f.path.replace(/\\/g, "\\\\")}')" title="Copier le chemin" class="text-gray-400 hover:text-blue-600">📋</button>` : ''}
+                        </div>
+                        <div class="font-black text-xl text-gray-800">${f.des} <span class="text-xs font-normal text-gray-400 ml-1">#${f.num}</span></div>
+                        <div class="text-[10px] text-gray-400 font-bold uppercase mt-1">🗓️ Échéance : ${f.datE || 'N/A'}</div>
+                        <div class="text-red-600 font-black text-2xl mt-1 tracking-tight">${f.restant.toFixed(2)}€ <span class="text-[10px] text-gray-300 font-normal uppercase italic">/ ${f.total.toFixed(2)}€</span></div>
+                    </div>
+                    <div class="flex gap-2 items-end bg-gray-50 p-3 rounded-lg border">
+                        <div class="flex flex-col"><label class="text-[9px] font-bold">DATE</label><input type="date" id="dP-${f.id}" value="${today}" class="border text-xs p-1 rounded"></div>
+                        <div class="flex flex-col"><label class="text-[9px] font-bold">MODE</label><select id="mP-${f.id}" class="border text-xs p-1 rounded font-bold"><option>Virement</option><option>Chèque</option><option>Espèces</option><option>CB</option></select></div>
+                        <div class="flex flex-col"><label class="text-[9px] font-bold">SOMME</label><input type="number" id="vP-${f.id}" class="border text-xs p-1 w-20 rounded font-bold"></div>
+                        <button onclick="payer(${f.id})" class="bg-red-600 text-white px-4 rounded font-bold text-xs h-[32px] hover:bg-red-700">PAYER</button>
+                        <button onclick="modifier(${f.id})" class="bg-gray-200 text-gray-600 px-2 rounded font-bold text-xs h-[32px] hover:bg-gray-300 transition">⚙️</button>
+                        <button onclick="suppr(${f.id}, 'enCours')" class="text-gray-300 hover:text-red-500 px-1 self-end h-[34px]">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('historique').innerHTML = data.historique.map(f => `
+                <div class="text-[11px] flex justify-between border-b pb-2 text-gray-500 items-center">
+                    <span><b class="text-gray-700">${f.des}</b> (#${f.num}) ${f.path ? `<button onclick="copyPath('${f.path.replace(/\\/g, "\\\\")}')" class="ml-2 text-blue-400 hover:underline">📋 Copier chemin</button>` : ''}</span>
+                    <span class="font-black text-emerald-600 uppercase">Soldée ${f.total.toFixed(2)}€ le ${f.dateFin} <button onclick="suppr(${f.id}, 'historique')" class="ml-4 text-red-200 hover:text-red-500 text-lg">🗑️</button></span>
+                </div>
+            `).join('');
+
+            document.getElementById('journal').innerHTML = data.journal.slice(0, 5).map(v => `
+                <tr class="border-b text-gray-500"><td class="p-2 font-bold">${v.date}</td><td>${v.nom}</td><td class="font-black text-blue-600">${v.montant.toFixed(2)}€</td><td class="text-right p-2"><button onclick="annulerV(${v.idV})" class="text-red-200 hover:text-red-500">Annuler</button></td></tr>
+            `).join('');
+        }
+
+        function ajouter() {
+            const num = document.getElementById('num').value;
+            const mon = parseFloat(document.getElementById('mon').value);
+            if (num && mon > 0) {
+                data.enCours.push({
+                    id: Date.now(), num, des: document.getElementById('des').value || "Sans titre",
+                    total: mon, restant: mon,
+                    datF: document.getElementById('datF').value, datE: document.getElementById('datE').value,
+                    path: document.getElementById('path').value
+                });
+                save();
+                ['num', 'des', 'mon', 'datF', 'datE', 'path'].forEach(i => document.getElementById(i).value = '');
+            }
+        }
+
+        function payer(id) {
+            const f = data.enCours.find(i => i.id === id);
+            const m = parseFloat(document.getElementById(`vP-${id}`).value);
+            const mode = document.getElementById(`mP-${id}`).value;
+            const date = document.getElementById(`dP-${id}`).value;
+            if (m > 0 && m <= (f.restant + 0.01)) {
+                f.restant = Math.round((f.restant - m) * 100) / 100;
+                data.journal.unshift({ idV: Date.now(), idF: f.id, date: new Date(date).toLocaleDateString('fr-FR'), montant: m, nom: f.des, mode: mode });
+                if (f.restant <= 0) { f.dateFin = new Date(date).toLocaleDateString('fr-FR'); data.historique.unshift(f); data.enCours = data.enCours.filter(i => i.id !== id); }
+                save();
+            }
+        }
+
+        function annulerV(idV) {
+            const v = data.journal.find(i => i.idV === idV);
+            let f = data.enCours.find(i => i.id === v.idF) || data.historique.find(i => i.id === v.idF);
+            if (f) {
+                f.restant += v.montant;
+                if (f.dateFin) { data.enCours.push(f); data.historique = data.historique.filter(x => x.id !== f.id); delete f.dateFin; }
+            }
+            data.journal = data.journal.filter(i => i.idV !== idV);
+            save();
+        }
+
+        function suppr(id, type) { if(confirm("Supprimer ?")) { data[type] = data[type].filter(i => i.id !== id); data.journal = data.journal.filter(v => v.idF !== id); save(); } }
+        
+        function exporterDonnees() {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], {type: 'application/json'}));
+            a.download = 'sauvegarde_factures.json';
+            a.click();
+        }
+
+        function importerDonnees(e) {
+            const reader = new FileReader();
+            reader.onload = (ev) => { data = JSON.parse(ev.target.result); save(); };
+            reader.readAsText(e.target.files[0]);
+        }
+
+        render();
+    </script>
+</body>
+</html>
